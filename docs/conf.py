@@ -1,4 +1,4 @@
-"""Sphinx configuration file for Parcels documentation."""
+"""autoSphinx configuration file for Parcels documentation."""
 # parcels documentation build configuration file, created by
 # sphinx-quickstart on Tue Oct 20 09:58:20 2015.
 #
@@ -14,12 +14,11 @@
 import datetime
 import inspect
 import os
-import re
-import shutil
 import sys
-import tempfile
 import warnings
 from pathlib import Path
+
+PROJECT_ROOT = (Path(__file__).parent / "..").resolve()
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -40,10 +39,11 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx.ext.mathjax",
     "sphinx.ext.napoleon",
-    "myst_parser",
-    "nbsphinx",
+    "myst_nb",
     "numpydoc",
     "sphinxcontrib.mermaid",
+    "sphinx_design",
+    "autoapi.extension",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -51,8 +51,7 @@ templates_path = ["_templates"]
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
-# source_suffix = ['.rst', '.md']
-source_suffix = ".rst"
+source_suffix = [".rst", ".md"]
 
 # The encoding of source files.
 # source_encoding = 'utf-8-sig'
@@ -62,8 +61,8 @@ master_doc = "index"
 
 # General information about the project.
 project = "Parcels"
-copyright = f"{datetime.datetime.now().year}, The OceanParcels Team"
-author = "The OceanParcels Team"
+copyright = f"{datetime.datetime.now().year}, The Parcels Team"
+author = "The Parcels Team"
 
 linkcheck_ignore = [
     r"http://localhost:\d+/",
@@ -80,7 +79,7 @@ linkcheck_ignore = [
     r"https://www\.nodc\.noaa\.gov/",  # 2023-06-23 Site non-responsive
     r"https://mybinder\.org/",  # 2023-09-02 Site non-responsive
     r"https://ariane-code.cnrs.fr/",  # 2024-04-30 Site non-responsive
-    r"https://github.com/OceanParcels/parcels/blob/daa4b062ed8ae0b2be3d87367d6b45599d6f95db/parcels/.*",  # ignore GitHub anchors to blobs because of https://github.com/sphinx-doc/sphinx/issues/6779
+    r"https://github.com/Parcels-code/parcels/blob/daa4b062ed8ae0b2be3d87367d6b45599d6f95db/parcels/.*",  # ignore GitHub anchors to blobs because of https://github.com/sphinx-doc/sphinx/issues/6779
 ]
 
 # Define the canonical URL using custom domain on Read the Docs
@@ -118,7 +117,13 @@ language = "en"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ["_build", "**.ipynb_checkpoints"]
+exclude_patterns = [
+    "_build",
+    "jupyter_execute",
+    "**.ipynb_checkpoints",
+    "user_guide/examples_v3",
+    ".jupyter_cache",
+]
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -178,28 +183,19 @@ html_favicon = "favicon.ico"
 # ----------------
 numpydoc_class_members_toctree = False  # https://stackoverflow.com/a/73294408
 
-# full list of numpydoc error codes: https://numpydoc.readthedocs.io/en/latest/validation.html
-numpydoc_validation_checks = {
-    "GL05",
-    "GL06",
-    "GL07",
-    "GL10",
-    "PR05",
-    "PR10",
-    "RT02",
-}
-
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 html_theme_options = {
     "logo": {
-        "image_light": "logo-horo.svg",
-        "image_dark": "logo-horo_dia.svg",
+        "alt_text": "Parcels - Home",
+        "image_light": "_static/logo-horo-transparent.png",
+        "image_dark": "_static/logo-horo-transparent-dark.png",
     },
     "use_edit_page_button": True,
-    "github_url": "https://github.com/OceanParcels/parcels",
+    "github_url": "https://github.com/Parcels-code/parcels",
     "icon_links": [
         {
             "name": "Conda Forge",
@@ -208,42 +204,17 @@ html_theme_options = {
             "type": "fontawesome",
         }
     ],
-    "announcement": "WARNING: This documentation is built for v4 of Parcels, which is unreleased and in active development. Use the version switcher in the bottom right to select your version of Parcels, or see <a href='https://docs.oceanparcels.org/'>stable docs</a>.",
+    "announcement": "WARNING: This documentation is built for v4 of Parcels, which is unreleased and in active development. Use the version switcher in the bottom right to select your version of Parcels, or see <a href='https://docs.parcels-code.org/'>stable docs</a>.",
+    "header_links_before_dropdown": 8,
+    "navbar_align": "left",
 }
 
 html_context = {
-    "github_user": "OceanParcels",
+    "github_user": "Parcels-code",
     "github_repo": "parcels",
     "github_version": "main",
     "doc_path": "docs",
 }
-
-
-# Copy code examples to download directory
-downloads_folder = Path("_downloads")
-downloads_folder.mkdir(exist_ok=True)
-
-
-def make_filename_safe(filename: str, safe_char: str = "_") -> str:
-    """Make a filename safe for saving to disk."""
-    # Replace any characters that are not allowed in a filename with the safe character
-    safe_filename = re.sub(r'[\\/:*?"<>|]', safe_char, filename)
-    return safe_filename
-
-
-with tempfile.TemporaryDirectory() as temp_dir:
-    temp_dir = Path(temp_dir)
-
-    # Copy examples folder to temp directory (with a folder name matching parcels version)
-    examples_folder = temp_dir / make_filename_safe(f"parcels_tutorials ({version})")
-    shutil.copytree("examples", examples_folder)
-
-    # Zip contents of temp directory and save to _downloads folder
-    shutil.make_archive(
-        "_downloads/parcels_tutorials",
-        "zip",
-        temp_dir,
-    )
 
 
 # based on pandas doc/source/conf.py
@@ -298,11 +269,11 @@ def linkcode_resolve(domain, info):
 
     if "-" in parcels.__version__:
         return (
-            f"https://github.com/OceanParcels/parcels/blob/main/parcels/{fn}{linespec}"
+            f"https://github.com/Parcels-code/parcels/blob/main/parcels/{fn}{linespec}"
         )
     else:
         return (
-            f"https://github.com/OceanParcels/parcels/blob/"
+            f"https://github.com/Parcels-code/parcels/blob/"
             f"{parcels.__version__}/parcels/{fn}{linespec}"
         )
 
@@ -322,7 +293,7 @@ html_extra_path = ["robots.txt"]
 
 # Custom sidebar templates, maps document names to template names.
 
-html_sidebars = {"**": ["sidebar-nav-bs"], "documentation/additional_examples": []}
+html_sidebars = {"**": ["sidebar-nav-bs"]}
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.
@@ -371,18 +342,21 @@ html_sidebars = {"**": ["sidebar-nav-bs"], "documentation/additional_examples": 
 # Output file base name for HTML help builder.
 htmlhelp_basename = "parcelsdoc"
 
-nbsphinx_thumbnails = {
-    "examples/tutorial_parcels_structure": "_images/parcels_user_diagram.png",
-    "examples/tutorial_timestamps": "_static/calendar-icon.jpg",
-    "examples/documentation_homepage_animation": "_images/homepage.gif",
-    "examples/tutorial_interaction": "_static/pulled_particles_twoatractors_line.gif",
-    "examples/documentation_LargeRunsOutput": "_static/harddrive.png",
-    "examples/tutorial_unitconverters": "_static/globe-icon.jpg",
-    "examples/documentation_geospatial": "_images/tutorial_geospatial_google_earth.png",
-    "examples/tutorial_kernelloop": "_static/loop-icon.jpeg",
-}
-nbsphinx_execute = "never"
 # -- Options for LaTeX output ---------------------------------------------
+
+BRANCH = (
+    os.environ.get("READTHEDOCS_GIT_IDENTIFIER")  # ReadTheDocs
+    or "main"  # fallback
+)
+
+nbsphinx_prolog = f"""
+.. raw:: html
+
+    Run this notebook in the cloud <a href="https://mybinder.org/v2/gh/Parcels-code/Parcels/{BRANCH}?urlpath=lab/tree/docs/{{{{  env.doc2path(env.docname, base=None)  }}}}" target="_blank"><img alt="Binder badge" src="https://mybinder.org/badge_logo.svg"></a>
+    , or view it <a href="https://github.com/Parcels-code/Parcels/blob/{BRANCH}/docs/{{{{  env.doc2path(env.docname, base=None)  }}}}" target="_blank">on GitHub</a>. Notebook version corresponds with {BRANCH}.
+
+    <p style="margin-bottom: 30px"></p>
+"""
 
 latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
@@ -537,3 +511,29 @@ epub_exclude_files = ["search.html"]
 
 # If false, no index is generated.
 # epub_use_index = True
+
+# -- Options for MyST parser ----------------------------------------------
+myst_heading_anchors = 3
+
+myst_enable_extensions = ["substitution", "amsmath", "dollarmath"]
+
+# -- Options for MyST-nb --------------------------------------------------
+nb_execution_mode = "cache"
+nb_execution_excludepatterns = ["jupyter_execute", ".jupyter_cache"]
+nb_execution_raise_on_error = True
+nb_execution_timeout = 75
+
+# -- Options for autoapi --------------------------------------------------
+autoapi_dirs = ["../src/parcels"]
+autoapi_add_toctree_entry = False
+autoapi_root = "reference"
+autoapi_options = [
+    "members",
+    # "show-inheritance",
+    "undoc-members",
+    "show-module-summary",
+    "imported-members",
+]
+autoapi_member_order = "bysource"
+autodoc_typehints = "none"
+autoapi_own_page_level = "class"

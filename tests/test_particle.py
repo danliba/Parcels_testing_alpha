@@ -2,14 +2,11 @@ import numpy as np
 import pytest
 
 from parcels._core.particle import (
-    _SAME_AS_FIELDSET_TIME_INTERVAL,
     Particle,
     ParticleClass,
     Variable,
     create_particle_data,
 )
-from parcels._core.utils.time import TimeInterval
-from parcels._datasets.structured.generic import TIME
 
 
 def test_variable_init():
@@ -21,14 +18,14 @@ def test_variable_init():
 
 
 def test_variable_invalid_init():
-    with pytest.raises(ValueError, match="to_write must be one of .*\. Got to_write="):
+    with pytest.raises(ValueError, match=r"to_write must be one of .*\. Got to_write="):
         Variable("name", to_write="test")
 
-    with pytest.raises(ValueError, match="to_write must be one of .*\. Got to_write="):
-        Variable("name", to_write="test")
+    with pytest.raises(TypeError, match="Expected a string for variable name, got int instead."):
+        Variable(123)
 
     for name in ["a b", "123", "while"]:
-        with pytest.raises(ValueError, match="Particle variable has to be a valid Python variable name. Got "):
+        with pytest.raises(ValueError, match=r"Received invalid Python variable name.*"):
             Variable(name)
 
     with pytest.raises(ValueError, match="Attributes cannot be set if to_write=False"):
@@ -81,11 +78,9 @@ def test_particleclass_invalid_vars():
                     Variable("varc", dtype=np.float32, to_write=True),
                 ]
             ),
-            """ParticleClass(variables=[
-    Variable(name='vara', dtype=dtype('float32'), initial=0, to_write=True, attrs={}),
-    Variable(name='varb', dtype=dtype('float32'), initial=0, to_write=False, attrs={}),
-    Variable(name='varc', dtype=dtype('float32'), initial=0, to_write=True, attrs={})
-])""",
+            """Variable(name='vara', dtype=dtype('float32'), initial=0, to_write=True, attrs={})
+Variable(name='varb', dtype=dtype('float32'), initial=0, to_write=False, attrs={})
+Variable(name='varc', dtype=dtype('float32'), initial=0, to_write=True, attrs={})""",
         ),
     ],
 )
@@ -143,9 +138,8 @@ def test_particleclass_add_variable_collision():
 )
 @pytest.mark.parametrize("nparticles", [5, 10])
 def test_create_particle_data(particle, nparticles):
-    time_interval = TimeInterval(TIME[0], TIME[-1])
     ngrids = 4
-    data = create_particle_data(pclass=particle, nparticles=nparticles, ngrids=ngrids, time_interval=time_interval)
+    data = create_particle_data(pclass=particle, nparticles=nparticles, ngrids=ngrids)
 
     assert isinstance(data, dict)
     assert len(data) == len(particle.variables) + 1  # ei variable is separate
@@ -159,7 +153,5 @@ def test_create_particle_data(particle, nparticles):
         assert variable_array.shape[0] == nparticles
 
         dtype = variable.dtype
-        if dtype is _SAME_AS_FIELDSET_TIME_INTERVAL.VALUE:
-            dtype = type(time_interval.left)
 
         assert variable_array.dtype == dtype

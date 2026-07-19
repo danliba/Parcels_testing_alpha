@@ -8,15 +8,20 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   build-artifacts:
     runs-on: ubuntu-latest
-    if: github.repository == 'OceanParcels/parcels'
+    if: github.repository == 'Parcels-code/parcels'
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         name: Install Python
         with:
           python-version: "3.11"
@@ -42,7 +47,7 @@ jobs:
           else
             echo "✅ Looks good"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: releases
           path: dist
@@ -50,12 +55,14 @@ jobs:
   test-built-dist:
     needs: build-artifacts
     runs-on: ubuntu-latest
+    permissions: {}
+    environment: test-pypi
     steps:
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         name: Install Python
         with:
           python-version: "3.11"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: releases
           path: dist
@@ -72,7 +79,7 @@ jobs:
 
       - name: Publish package to TestPyPI
         if: github.event_name == 'push'
-        uses: pypa/gh-action-pypi-publish@v1.12.4
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.12.4 # zizmor: ignore[use-trusted-publishing]
         with:
           user: __token__
           password: ${{ secrets.PARCELS_PYPI_TEST_TOKEN }}
@@ -83,24 +90,26 @@ jobs:
     needs: test-built-dist
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: releases
           path: dist
       - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.12.4
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
 
   test-pypi-release:
     needs: upload-to-pypi
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
         with:
           activate-environment: parcels
           python-version: "3.11"
           channels: conda-forge
       - run: conda install -c conda-forge pip
       - run: pip install parcels --no-cache
-      - run: curl https://raw.githubusercontent.com/OceanParcels/parcels/main/docs/examples/example_peninsula.py > example_peninsula.py
+      - run: curl https://raw.githubusercontent.com/Parcels-code/parcels/main/docs/examples/example_peninsula.py > example_peninsula.py
       - run: python example_peninsula.py

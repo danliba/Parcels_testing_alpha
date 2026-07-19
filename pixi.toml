@@ -1,50 +1,77 @@
 [workspace]
 name = "Parcels"
+exclude-newer = "5d" # security pre-caution against compromised packages
 preview = ["pixi-build"]
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
+requires-pixi = ">=0.67.0,!=0.68.0,<0.71.0"
 
 [package]
 name = "parcels"
 version = "dynamic" # dynamic versioning needs better support in pixi https://github.com/prefix-dev/pixi/issues/2923#issuecomment-2598460666 . Putting `version = "dynamic"` here for now until pixi recommends something else.
 
 [package.build]
-backend = { name = "pixi-build-python", version = "==0.3.2" }
+backend = { name = "pixi-build-python", version = "0.4.*" }
 
 [package.host-dependencies]
 setuptools = "*"
 setuptools_scm = "*"
 
-[environments]
-test-latest = { features = ["test"], solve-group = "test" }
-test-py311 = { features = ["test", "py311"] }
-test-py312 = { features = ["test", "py312"] }
-test-notebooks = { features = ["test", "notebooks"], solve-group = "test" }
-docs = { features = ["docs"], solve-group = "docs" }
-typing = { features = ["typing"], solve-group = "typing" }
-pre-commit = { features = ["pre-commit"], no-default-feature = true }
 
-[dependencies] # keep section in sync with pyproject.toml dependencies
-python = ">=3.11,<3.13"
-netcdf4 = ">=1.1.9"
-numpy = ">=1.9.1"
-tqdm = "*"
-xarray = ">=0.10.8"
-uxarray = ">=2025.3.0"
-dask = ">=2.0"
-scikit-learn = "*"
-zarr = ">=2.11.0,!=2.18.0,<3"
-xgcm = ">=0.9.0"
-cf_xarray = "*"
-cftime = ">=1.3.1"
-scipy = ">=0.16.0" #? Not sure if we rely on scipy internally anymore...
-pooch = "*"
+[package.run-dependencies] # keep section in sync with pyproject.toml dependencies
+python = ">=3.11"
+netcdf4 = ">=1.6.0"
+numpy = ">=2.1.0"
+tqdm = ">=4.50.0"
+xarray = ">=2024.5.0"
+pandas = ">=2.2"
+pyarrow = ">=20.0.0"
+holoviews = ">=1.22.0" # https://github.com/prefix-dev/rattler-build/issues/2326
+uxarray = ">=2026.04.1"
+dask = ">=2024.5.1"
+zarr = ">=3"
+xgcm = { git = "https://github.com/xgcm/xgcm", rev = "532a3c567c475cbe192f49b9961f8117806bbfb7" } # TODO: Switch to release version after release is cut
+cf_xarray = ">=0.8.6"
+cftime = ">=1.6.3"
+pooch = ">=1.8.0"
+polars = ">=1.31.0"
+tabulate = ">=0.10.0"
+
+
+[dependencies]
+parcels = { path = "." }
+
+[feature.rattler-build.dependencies]
+python = "*"
+git = "*"
+rattler-build = "*"
+
+[feature.rattler-build.tasks]
+get-parcels-alpha-version = { cmd = "python tools/get-parcels-alpha-version.py" }
+build-parcels = { cmd = "rattler-build build --recipe .github/ci/recipe.yaml", description = "Build the Parcels conda package" }
+
+[feature.minimum.dependencies]
+python = "3.11.*"
+netcdf4 = "1.6.*"
+numpy = "2.1.*"
+tqdm = "4.50.*"
+xarray = "2025.8.*"
+pandas = "2.2.*"
+pyarrow = "20.0.*"
+uxarray = "==2026.04.1"
+dask = "2024.6.*"
+zarr = "3.0.*"
+xgcm = { version = "0.9.*", channel = "conda-forge" }
+cf_xarray = "0.10.*"
+cftime = "1.6.*"
+pooch = "1.8.*"
+polars = "1.31.*"
 
 [feature.py311.dependencies]
 python = "3.11.*"
 
-[feature.py312.dependencies]
-python = "3.12.*"
+[feature.py313.dependencies]
+python = "3.13.*"
 
 [feature.test.dependencies]
 nbval = "*"
@@ -54,41 +81,105 @@ pytest-html = "*"
 pytest-cov = "*"
 
 [feature.test.tasks]
-tests = "pytest"
-tests-notebooks = "pytest --nbval-lax -k 'argo' docs/examples"
+tests = { cmd = "pytest", description = "Run the test suite." }
+tests-flaky = { cmd = "pytest -m 'flaky'", description = "Run flaky tests." }
+tests-validation = { cmd = "pytest -m 'validation'", description = "Run validation tests." }
+tests-notebooks = { cmd = "pytest --nbval-lax docs/user_guide/examples", description = "Run the user guide example notebooks as tests." }
 
 
 [feature.notebooks.dependencies]
 jupyter = "*"
 trajan = "*"
 matplotlib-base = ">=2.0.2"
+gsw = "*"
+py-triangle = "*"
+
+[feature.devtools.dependencies]
+pdbpp = "*"
+line_profiler = "*"
+memory_profiler = "*"
+snakeviz = "*"
+icecream = "*"
+ipykernel = "*"
+snoop = "*"
+pyinstrument = "*"
+
+[feature.devtools.target.linux-64.dependencies]
+memray = "*"
+
+[feature.devtools.target.osx-64.dependencies]
+memray = "*"
+
+[feature.devtools.target.osx-arm64.dependencies]
+memray = "*"
+
+[feature.devtools.pypi-dependencies]
+tuna = ">=0.5.11"
 
 [feature.docs.dependencies]
-numpydoc = "!=1.9.0"
-nbsphinx = "*"
+parcels = { path = "." }
+numpydoc = "*"
+myst-nb = "*"
 ipython = "*"
 sphinx = "*"
 pandoc = "*"
 pydata-sphinx-theme = "*"
 sphinx-autobuild = "*"
-myst-parser = "*"
 sphinxcontrib-mermaid = "*"
+sphinx-design = "*"
+sphinx-autoapi = "*"
 
 [feature.docs.tasks]
-docs = "sphinx-build docs docs/_build"
-docs-watch = 'sphinx-autobuild --ignore "*.zip" docs docs/_build'
-docs-linkcheck = "sphinx-build -b linkcheck docs/ docs/_build/linkcheck"
+docs-only-clean = { cmd = "make clean", cwd = "docs", description = "Cleans the documentation folder of build artifacts." }
+docs = { cmd = "make html", cwd = "docs", description = "Build the documentation." }
+docs-clean = { depends-on = [
+  { task = "docs-only-clean" },
+  { task = "docs" },
+], description = "Build the documentation from a clean docs folder." }
+docs-watch = { cmd = "make livehtml", cwd = "docs", description = "Build and auto-rebuild the documentation on changes.", depends-on = [
+  "docs-only-clean",
+] }
+docs-linkcheck = { cmd = "make linkcheck", cwd = "docs", description = "Verify all links in documentation don't 404." }
 
 [feature.pre-commit.dependencies]
 pre_commit = "*"
 
 [feature.pre-commit.tasks]
-lint = "pre-commit run --all-files"
+lint = { cmd = "pre-commit run --all-files", description = "Run all pre-commit linting hooks." }
+
+[feature.numpydoc.dependencies]
+numpydoc = "*"
+
+[feature.numpydoc.tasks]
+numpydoc-lint = { cmd = "python tools/numpydoc-public-api.py", description = "Lint public API docstrings with numpydoc." }
 
 [feature.typing.dependencies]
 mypy = "*"
 lxml = "*" # in CI
 types-tqdm = "*"
+pandas-stubs = "*"
 
 [feature.typing.tasks]
-typing = "mypy parcels --install-types"
+typing = { cmd = "mypy src/parcels --install-types", description = "Run static type checking with mypy." }
+
+
+[environments]
+default = { features = [
+  "test",
+  "notebooks",
+  "typing",
+  "pre-commit",
+  "numpydoc",
+  "devtools",
+], solve-group = "main" }
+test = { features = ["test"], solve-group = "main" }
+test-minimum = { features = ["test", "minimum"] }
+test-py311 = { features = ["test", "py311"] }
+test-py313 = { features = ["test", "py313"] }
+test-notebooks = { features = ["test", "notebooks"], solve-group = "main" }
+docs = { features = ["docs", "notebooks"], solve-group = "docs" }
+typing = { features = ["typing"], solve-group = "main" }
+build = { features = ["rattler-build"] }
+
+[pypi-dependencies]
+detect-test-pollution = ">=1.2.0, <2"

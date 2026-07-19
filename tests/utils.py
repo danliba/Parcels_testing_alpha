@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import struct
+from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
+import cftime
 import numpy as np
 import xarray as xr
 
 import parcels
-from parcels import Field, FieldSet, VectorField
+from parcels import FieldSet, Particle, Variable
 from parcels._core.xgrid import _FIELD_DATA_ORDERING, XGrid, get_axis_from_dim_name
 from parcels._datasets.structured.generated import simple_UV_dataset
-from parcels.interpolators import XLinear
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_ROOT = PROJECT_ROOT / "tests"
 TEST_DATA = TEST_ROOT / "test_data"
+
+# Define default particle classes for different built-in kernels
+DEFAULT_PARTICLES = defaultdict(lambda: Particle)
+DEFAULT_PARTICLES[parcels.kernels.AdvectionRK45] = Particle.add_variable(Variable("next_dt"))
 
 
 def create_fieldset_unit_mesh(xdim=20, ydim=20, mesh="flat") -> FieldSet:
@@ -73,12 +79,7 @@ def create_fieldset_zeros_conversion(mesh="spherical", xdim=200, ydim=100) -> Fi
     ds = simple_UV_dataset(dims=(2, 1, ydim, xdim), mesh=mesh)
     ds["lon"].data = np.linspace(-1e6 * mesh_conversion, 1e6 * mesh_conversion, xdim)
     ds["lat"].data = np.linspace(-1e6 * mesh_conversion, 1e6 * mesh_conversion, ydim)
-    grid = XGrid.from_dataset(ds, mesh=mesh)
-    U = Field("U", ds["U"], grid, interp_method=XLinear)
-    V = Field("V", ds["V"], grid, interp_method=XLinear)
-
-    UV = VectorField("UV", U, V)
-    return FieldSet([U, V, UV])
+    return FieldSet.from_sgrid_conventions(ds, mesh=mesh)
 
 
 def create_simple_pset(n=1):
@@ -86,8 +87,8 @@ def create_simple_pset(n=1):
     return parcels.ParticleSet(
         fieldset=create_fieldset_unit_mesh(),
         pclass=parcels.Particle,
-        lon=zeros,
-        lat=zeros,
+        x=zeros,
+        y=zeros,
         depth=zeros,
         time=zeros,
     )
@@ -144,7 +145,7 @@ def round_and_hash_float_array(arr, decimals=6):
 
     # Adapted from https://cs.stackexchange.com/a/37965
     h = 1
-    for f in arr:
+    for f in arr.flat:
         # Mimic Float.floatToIntBits: converts float to 4-byte binary, then interprets as int
         float_as_int = struct.unpack("!i", struct.pack("!f", f))[0]
         h = 31 * h + float_as_int
@@ -152,3 +153,16 @@ def round_and_hash_float_array(arr, decimals=6):
     # Mimic Java's HashMap hash transformation
     h ^= (h >> 20) ^ (h >> 12)
     return h ^ (h >> 7) ^ (h >> 4)
+
+
+def assert_cftime_like_particlefile(parquet_path: Path) -> None:
+    assert parquet_path.suffix == ".parquet", "Path must be a parquet file"
+
+    df = parcels.read_particlefile(parquet_path, decode_times=True)
+
+    # check first value (and hence rest of array) is what we expect
+    # TODO explore use of cftime in polars
+    assert isinstance(df["t"][0], (cftime.datetime, datetime)), (
+        "CF-time values in Parquet did not get properly decoded. Are the attributes correct?"
+    )
+    return

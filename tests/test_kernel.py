@@ -2,29 +2,15 @@ import numpy as np
 import pytest
 
 from parcels import (
-    Field,
-    FieldSet,
-    Kernel,
-    Particle,
     ParticleSet,
-    XGrid,
 )
-from parcels._datasets.structured.generic import datasets as datasets_structured
-from parcels.kernels import AdvectionRK4
+from parcels._core.kernel import Kernel
+from parcels.kernels import AdvectionRK4, AdvectionRK45
 from tests.common_kernels import MoveEast, MoveNorth
 
 
-@pytest.fixture
-def fieldset() -> FieldSet:
-    ds = datasets_structured["ds_2d_left"]
-    grid = XGrid.from_dataset(ds, mesh="flat")
-    U = Field("U", ds["U (A grid)"], grid)
-    V = Field("V", ds["V (A grid)"], grid)
-    return FieldSet([U, V])
-
-
 def test_unknown_var_in_kernel(fieldset):
-    pset = ParticleSet(fieldset, lon=[0.5], lat=[0.5])
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
 
     def ErrorKernel(particles, fieldset):  # pragma: no cover
         particles.unknown_varname += 0.2
@@ -33,23 +19,49 @@ def test_unknown_var_in_kernel(fieldset):
         pset.execute(ErrorKernel, runtime=np.timedelta64(2, "s"), dt=np.timedelta64(1, "s"))
 
 
+def test_context_in_kernel(fieldset):
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
+
+    fieldset.add_context("fix_lon", -0.5)
+
+    def ContextKernel(particles, fieldset):
+        particles.x = fieldset.fix_lon
+
+    pset.execute(ContextKernel, runtime=np.timedelta64(2, "s"), dt=np.timedelta64(1, "s"))
+    assert pset.x == -0.5
+
+
+def test_func_context_in_kernel(fieldset):
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
+
+    def ContextFunc(x):
+        return 2 * x
+
+    fieldset.add_context("func", ContextFunc)
+
+    def FuncContextKernel(particles, fieldset):
+        particles.x = fieldset.func(particles.x)
+
+    pset.execute(FuncContextKernel, runtime=np.timedelta64(2, "s"), dt=np.timedelta64(1, "s"))
+    assert pset.x == 2.0
+
+
 def test_kernel_init(fieldset):
-    Kernel(fieldset, ptype=Particle, pyfuncs=[AdvectionRK4])
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
+    Kernel(kernels=[AdvectionRK4], pset=pset)
 
 
 def test_kernel_merging(fieldset):
-    k1 = Kernel(fieldset, ptype=Particle, pyfuncs=[AdvectionRK4])
-    k2 = Kernel(fieldset, ptype=Particle, pyfuncs=[MoveEast, MoveNorth])
-
-    merged_kernel = k1 + k2
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
+    merged_kernel = Kernel(kernels=[AdvectionRK4, MoveEast, MoveNorth], pset=pset)
     assert merged_kernel.funcname == "AdvectionRK4MoveEastMoveNorth"
-    assert len(merged_kernel._pyfuncs) == 3
-    assert merged_kernel._pyfuncs == [AdvectionRK4, MoveEast, MoveNorth]
+    assert len(merged_kernel._kernels) == 3
+    assert merged_kernel._kernels == [AdvectionRK4, MoveEast, MoveNorth]
 
-    merged_kernel = k2 + k1
+    merged_kernel = Kernel(kernels=[MoveEast, MoveNorth, AdvectionRK4], pset=pset)
     assert merged_kernel.funcname == "MoveEastMoveNorthAdvectionRK4"
-    assert len(merged_kernel._pyfuncs) == 3
-    assert merged_kernel._pyfuncs == [MoveEast, MoveNorth, AdvectionRK4]
+    assert len(merged_kernel._kernels) == 3
+    assert merged_kernel._kernels == [MoveEast, MoveNorth, AdvectionRK4]
 
 
 def test_kernel_from_list(fieldset):
@@ -59,9 +71,9 @@ def test_kernel_from_list(fieldset):
     Tests that a Kernel can be created from a list functions, or a list of
     mixed functions and kernel objects.
     """
-    pset = ParticleSet(fieldset, lon=[0.5], lat=[0.5])
-    kernels_single = pset.Kernel([AdvectionRK4])
-    kernels_functions = pset.Kernel([AdvectionRK4, MoveEast, MoveNorth])
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
+    kernels_single = Kernel(kernels=[AdvectionRK4], pset=pset)
+    kernels_functions = Kernel(kernels=[AdvectionRK4, MoveEast, MoveNorth], pset=pset)
 
     # Check if the kernels were combined correctly
     assert kernels_single.funcname == "AdvectionRK4"
@@ -74,21 +86,29 @@ def test_kernel_from_list_error_checking(fieldset):
 
     Tests that various error cases raise appropriate messages.
     """
-    pset = ParticleSet(fieldset, lon=[0.5], lat=[0.5])
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
 
-    with pytest.raises(ValueError, match="List of `pyfuncs` should have at least one function."):
-        pset.Kernel([])
+    with pytest.raises(ValueError, match="List of `kernels` should have at least one function."):
+        Kernel(kernels=[], pset=pset)
 
-    with pytest.raises(ValueError, match="Argument `pyfunc_list` should be a list of functions."):
-        pset.Kernel([AdvectionRK4, "something else"])
+    with pytest.raises(TypeError, match=r"Argument `kernels` should be a function or list of functions.*"):
+        Kernel(kernels=[AdvectionRK4, "something else"], pset=pset)
 
-    with pytest.raises(ValueError, match="Argument `pyfunc_list` should be a list of functions."):
-        kernels_mixed = pset.Kernel([pset.Kernel(AdvectionRK4), MoveEast, MoveNorth])
+    with pytest.raises(TypeError, match=r".* should be a function or list of functions.*"):
+        kernels_mixed = Kernel(kernels=[Kernel(kernels=[AdvectionRK4], pset=pset), MoveEast, MoveNorth], pset=pset)
         assert kernels_mixed.funcname == "AdvectionRK4MoveEastMoveNorth"
 
 
+def test_RK45Kernel_error_no_next_dt(fieldset):
+    """Tests that kernel throws error if Particle class does not have next_dt for RK45"""
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
+
+    with pytest.raises(ValueError, match='ParticleClass requires a "next_dt" for AdvectionRK45 Kernel.'):
+        Kernel(kernels=[AdvectionRK45], pset=pset)
+
+
 def test_kernel_signature(fieldset):
-    pset = ParticleSet(fieldset, lon=[0.5], lat=[0.5])
+    pset = ParticleSet(fieldset, x=[0.5], y=[0.5])
 
     def good_kernel(particles, fieldset):
         pass
@@ -105,23 +125,23 @@ def test_kernel_signature(fieldset):
     def kernel_with_forced_kwarg(particles, *, fieldset=0):
         pass
 
-    pset.Kernel(good_kernel)
+    Kernel(kernels=[good_kernel], pset=pset)
 
     with pytest.raises(ValueError, match="Kernel function must have 2 parameters, got 3"):
-        pset.Kernel(version_3_kernel)
+        Kernel(kernels=[version_3_kernel], pset=pset)
 
     with pytest.raises(
         ValueError, match="Parameter 'particle' has incorrect name. Expected 'particles', got 'particle'"
     ):
-        pset.Kernel(version_3_kernel_without_time)
+        Kernel(kernels=[version_3_kernel_without_time], pset=pset)
 
     with pytest.raises(
         ValueError, match="Parameter 'fieldset' has incorrect name. Expected 'particles', got 'fieldset'"
     ):
-        pset.Kernel(kernel_switched_args)
+        Kernel(kernels=[kernel_switched_args], pset=pset)
 
     with pytest.raises(
         ValueError,
         match="Parameter 'fieldset' has incorrect parameter kind. Expected POSITIONAL_OR_KEYWORD, got KEYWORD_ONLY",
     ):
-        pset.Kernel(kernel_with_forced_kwarg)
+        Kernel(kernels=[kernel_with_forced_kwarg], pset=pset)

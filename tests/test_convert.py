@@ -1,0 +1,184 @@
+import pytest
+import uxarray as ux
+import xarray as xr
+
+import parcels
+import parcels.convert as convert
+import parcels.tutorial
+from parcels import FieldSet
+from parcels._datasets.remote import open_remote_dataset
+from parcels._datasets.structured.circulation_models import datasets as datasets_circulation_models
+from parcels.interpolators._xinterpolators import _get_offsets_dictionary
+
+
+@pytest.mark.parametrize(
+    "U, V, coords",
+    [
+        pytest.param(
+            parcels.tutorial.open_dataset("NemoCurvilinear_data_zonal/U"),
+            parcels.tutorial.open_dataset("NemoCurvilinear_data_zonal/V"),
+            parcels.tutorial.open_dataset("NemoCurvilinear_data_zonal/mesh_mask"),
+            id="NemoCurvilinear_data_zonal",
+        ),
+    ],
+)
+def test_nemo_to_sgrid_2d(U, V, coords):  # noqa: N803
+    ds = convert.nemo_to_sgrid(fields=dict(U=U, V=V), coords=coords)
+
+    assert ds["grid"].attrs == {
+        "cf_role": "grid_topology",
+        "topology_dimension": 2,
+        "node_dimensions": "x y",
+        "face_dimensions": "x_center:x (padding:low) y_center:y (padding:low)",
+        "node_coordinates": "lon lat",
+        "vertical_dimensions": "depth_center:depth (padding:high)",
+    }
+
+    meta = ds.sgrid.metadata
+
+    # Assuming that node_dimension1 and node_dimension2 correspond to X and Y respectively
+    # check that U and V are properly defined on the staggered grid
+    assert {
+        meta.get_value_by_id("node_dimension1"),  # X edge
+        meta.get_value_by_id("face_dimension2"),  # Y center
+    }.issubset(set(ds["U"].dims))
+    assert {
+        meta.get_value_by_id("face_dimension1"),  # X center
+        meta.get_value_by_id("node_dimension2"),  # Y edge
+    }.issubset(set(ds["V"].dims))
+
+    parcels.FieldSet.from_sgrid_conventions(ds)
+
+
+@pytest.mark.parametrize(
+    "U, V, depth, coords",
+    [
+        (
+            open_remote_dataset("Benchmarks_MOi_data_metadata-only/U")[["vozocrtx"]].rename_vars({"vozocrtx": "U"}),
+            open_remote_dataset("Benchmarks_MOi_data_metadata-only/V")[["vomecrty"]].rename_vars({"vomecrty": "V"}),
+            open_remote_dataset("Benchmarks_MOi_data_metadata-only/W")["depthw"],
+            open_remote_dataset("Benchmarks_MOi_data_metadata-only/mesh")[["glamf", "gphif"]].isel(t=0),
+        ),
+    ],
+)
+def test_nemo_to_sgrid_with_depth(U, V, depth, coords):  # noqa: N803
+    coords["depthw"] = depth
+    ds = parcels.convert.nemo_to_sgrid(fields=dict(U=U, V=V), coords=coords)
+
+    assert ds["grid"].attrs == {
+        "cf_role": "grid_topology",
+        "topology_dimension": 2,
+        "node_dimensions": "x y",
+        "face_dimensions": "x_center:x (padding:low) y_center:y (padding:low)",
+        "node_coordinates": "lon lat",
+        "vertical_dimensions": "depth_center:depth (padding:high)",
+    }
+
+    meta = ds.sgrid.metadata
+
+    # Assuming that node_dimension1 and node_dimension2 correspond to X and Y respectively
+    # check that U and V are properly defined on the staggered grid
+    assert {
+        meta.get_value_by_id("node_dimension1"),  # X edge
+        meta.get_value_by_id("face_dimension2"),  # Y center
+    }.issubset(set(ds["U"].dims))
+    assert {
+        meta.get_value_by_id("face_dimension1"),  # X center
+        meta.get_value_by_id("node_dimension2"),  # Y edge
+    }.issubset(set(ds["V"].dims))
+
+    parcels.FieldSet.from_sgrid_conventions(ds)
+
+
+def test_convert_nemo_offsets():
+    U = parcels.tutorial.open_dataset("NemoCurvilinear_data_zonal/U")
+    V = parcels.tutorial.open_dataset("NemoCurvilinear_data_zonal/V")
+    coords = parcels.tutorial.open_dataset("NemoCurvilinear_data_zonal/mesh_mask")
+
+    ds = convert.nemo_to_sgrid(fields=dict(U=U, V=V), coords=coords)
+    fieldset = FieldSet.from_sgrid_conventions(ds)
+
+    offsets = _get_offsets_dictionary(fieldset.UV.grid)
+    assert offsets["X"] == 1
+    assert offsets["Y"] == 1
+    assert offsets["Z"] == 0
+
+
+def test_convert_mitgcm_offsets():
+    ds_fields = parcels.tutorial.open_dataset("MITgcm_example_data/mitgcm_UV_surface_zonally_reentrant")
+    coords = ds_fields[["XG", "YG", "Zl", "time"]]
+    ds_fset = convert.mitgcm_to_sgrid(fields={"U": ds_fields.UVEL, "V": ds_fields.VVEL}, coords=coords)
+    fieldset = FieldSet.from_sgrid_conventions(ds_fset)
+    offsets = _get_offsets_dictionary(fieldset.UV.grid)
+    assert offsets["X"] == 0
+    assert offsets["Y"] == 0
+    assert offsets["Z"] == 0
+
+
+def test_convert_croco_offsets():
+    ds = datasets_circulation_models["ds_CROCO_idealized"]
+    coords = ds[["x_rho", "y_rho", "s_w", "time"]]
+
+    ds = convert.croco_to_sgrid(fields={"U": ds["u"], "V": ds["v"]}, coords=coords)
+    fieldset = FieldSet.from_sgrid_conventions(ds)
+
+    offsets = _get_offsets_dictionary(fieldset.UV.grid)
+    assert offsets["X"] == 0
+    assert offsets["Y"] == 0
+    assert offsets["Z"] == 0
+
+
+_COPERNICUS_DATASETS = [
+    datasets_circulation_models["ds_copernicusmarine"],
+    datasets_circulation_models["ds_copernicusmarine_waves"],
+]
+
+
+@pytest.mark.parametrize("ds", _COPERNICUS_DATASETS)
+def test_convert_copernicusmarine(ds, caplog):
+    if "uo" in ds:
+        fields = {"U": ds["uo"], "V": ds["vo"]}
+    elif "VSDX" in ds:
+        fields = {"U": ds["VSDX"], "V": ds["VSDY"]}
+    else:
+        raise ValueError("Test dataset does not contain recognized current variables.")
+    ds_fset = convert.copernicusmarine_to_sgrid(fields=fields)
+    fieldset = FieldSet.from_sgrid_conventions(ds_fset)
+    assert "U" in fieldset.fields
+    assert "V" in fieldset.fields
+    assert "UV" in fieldset.fields
+
+
+def test_convert_copernicusmarine_no_currents(caplog):
+    ds = datasets_circulation_models["ds_copernicusmarine"]
+    ds_fset = convert.copernicusmarine_to_sgrid(fields={"do": ds["uo"]})
+    fieldset = FieldSet.from_sgrid_conventions(ds_fset)
+    assert "U" not in fieldset.fields
+    assert "V" not in fieldset.fields
+    assert "UV" not in fieldset.fields
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize("ds", _COPERNICUS_DATASETS)
+def test_convert_copernicusmarine_no_logs(ds, caplog):
+    ds = ds.copy()
+    zeros = xr.zeros_like(list(ds.data_vars.values())[0])
+    ds["U"] = zeros
+    ds["V"] = zeros
+
+    ds_fset = convert.copernicusmarine_to_sgrid(fields={"U": ds["U"], "V": ds["V"]})
+    fieldset = FieldSet.from_sgrid_conventions(ds_fset)
+    assert "U" in fieldset.fields
+    assert "V" in fieldset.fields
+    assert "UV" in fieldset.fields
+    assert caplog.text == ""
+
+
+def test_convert_fesom_to_ugrid():
+    grid_file = open_remote_dataset("Benchmarks_FESOM2-baroclinic-gyre/grid")
+    data_files = open_remote_dataset("Benchmarks_FESOM2-baroclinic-gyre/data")
+
+    grid = ux.open_grid(grid_file)
+    uxds = ux.UxDataset(data_files, uxgrid=grid)
+    uxds = convert.fesom_to_ugrid(uxds)
+    FieldSet.from_ugrid_conventions(uxds)

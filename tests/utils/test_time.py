@@ -6,56 +6,14 @@ import numpy as np
 import pytest
 from cftime import datetime as cftime_datetime
 from hypothesis import given
-from hypothesis import strategies as st
 
-from parcels._core.utils.time import TimeInterval, maybe_convert_python_timedelta_to_numpy
-
-calendar_strategy = st.sampled_from(
-    [
-        "gregorian",
-        "proleptic_gregorian",
-        "365_day",
-        "360_day",
-        "julian",
-        "366_day",
-        np.datetime64,
-        datetime,
-        np.timedelta64,
-    ]
+import parcels._strategies as pst  # parcels strategies
+from parcels._core.utils.time import (
+    TimeInterval,
+    _get_cf_attrs,
+    maybe_convert_python_timedelta_to_numpy,
+    timedelta_to_float,
 )
-
-
-@st.composite
-def np_timedelta64_strategy(draw):
-    """Strategy for generating np.timedelta64 objects."""
-    return np.timedelta64(draw(st.integers(1, 60 * 60 * 24 * 100 * 365)), "s")
-
-
-@st.composite
-def datetime_strategy(draw, calendar=None):
-    if calendar is None:
-        calendar = draw(calendar_strategy)
-    if calendar is np.timedelta64:
-        return draw(np_timedelta64_strategy())
-
-    year = draw(st.integers(1900, 2100))
-    month = draw(st.integers(1, 12))
-    day = draw(st.integers(1, 28))
-    if calendar is datetime:
-        return datetime(year, month, day)
-    if calendar is np.datetime64:
-        return np.datetime64(datetime(year, month, day))
-
-    return cftime_datetime(year, month, day, calendar=calendar)
-
-
-@st.composite
-def time_interval_strategy(draw, left=None, calendar=None):
-    if left is None:
-        left = draw(datetime_strategy(calendar=calendar))
-    right = left + draw(np_timedelta64_strategy())
-
-    return TimeInterval(left, right)
 
 
 @pytest.mark.parametrize(
@@ -78,23 +36,23 @@ def test_time_interval_initialization(left, right):
         TimeInterval(right, left)
 
 
-@given(time_interval_strategy())
+@given(pst.time.time_interval())
 def test_time_interval_contains(interval):
-    left = interval.left
-    right = interval.right
-    middle = left + (right - left) / 2
+    left = 0
+    right = timedelta_to_float(interval.right - interval.left)
+    middle = timedelta_to_float(interval.right - interval.left) / 2
 
     assert interval.is_all_time_in_interval(left)
     assert interval.is_all_time_in_interval(right)
     assert interval.is_all_time_in_interval(middle)
 
 
-@given(time_interval_strategy(calendar="365_day"), time_interval_strategy(calendar="365_day"))
+@given(pst.time.time_interval(calendar="365_day"), pst.time.time_interval(calendar="365_day"))
 def test_time_interval_intersection_commutative(interval1, interval2):
     assert interval1.intersection(interval2) == interval2.intersection(interval1)
 
 
-@given(time_interval_strategy())
+@given(pst.time.time_interval())
 def test_time_interval_intersection_with_self(interval):
     assert interval.intersection(interval) == interval
 
@@ -106,7 +64,7 @@ def test_time_interval_repr():
     assert repr(interval) == expected
 
 
-@given(time_interval_strategy())
+@given(pst.time.time_interval())
 def test_time_interval_equality(interval):
     assert interval == interval
 
@@ -198,3 +156,26 @@ def test_time_interval_intersection_different_calendars():
 def test_maybe_convert_python_timedelta_to_numpy(td, expected):
     result = maybe_convert_python_timedelta_to_numpy(td)
     assert result == expected
+
+
+@pytest.mark.parametrize(
+    "input, expected",
+    [
+        (timedelta(days=1), 24 * 60 * 60),
+        (np.timedelta64(1, "D"), 24 * 60 * 60),
+        (3600.0, 3600.0),
+    ],
+)
+def test_timedelta_to_float(input, expected):
+    assert timedelta_to_float(input) == expected
+
+
+def test_timedelta_to_float_exceptions():
+    with pytest.raises((ValueError, TypeError)):
+        timedelta_to_float("invalid_type")
+
+
+@given(pst.time.datetime_various())
+def test_datetime_get_cf_attrs(dt):
+    attrs = _get_cf_attrs(dt)
+    assert "seconds" in attrs["units"]
